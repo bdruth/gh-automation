@@ -1,0 +1,140 @@
+(ns github-clj.core
+  (:require
+    [tentacles.pulls :as pulls]
+    [tentacles.issues :as issues]
+    [clojure.edn :as edn])
+  (:use [tentacles.core :only [api-call]]))
+
+;; Requires a config.edn file in the cwd
+;; sample contents:
+;;{
+;;  :auth "auth-token-from-GitHub:x-oauth-basic"
+;;  :organization "some-org-or-userid"
+;;  :repository "some-repo"
+;;}
+(def config (edn/read-string (slurp "config.edn")))
+
+(def my-auth {:auth (:auth config)})
+(def organization (:organization config))
+(def repository (:repository config))
+
+(defn pulls [base]
+  (pulls/pulls organization repository (merge my-auth {:base base})))
+
+(defn get-prs [base]
+  (remove nil?
+    (map :number (pulls base))))
+
+(defn pull [id]
+  (pulls/specific-pull organization repository id my-auth))
+
+(defn mergeable-prs [base]
+  (map :number
+    (filter :mergeable
+      (map pull (get-prs base)))))
+
+(defn not-mergeable-prs [base]
+  (map :number
+    (remove :mergeable
+      (map pull (get-prs base)))))
+
+(defn issues [base]
+  (issues/issues organization repository (merge my-auth {:base base})))
+
+(defn commits
+  [id]
+  (pulls/commits organization repository id my-auth))
+
+(defn last-commit
+  [id]
+  (last (remove #(= {} %) (commits id))))
+
+(defn commit-statuses
+  [sha]
+  (remove nil?
+    (map :state (api-call :get "/repos/%s/%s/statuses/%s" [organization repository sha] my-auth))))
+
+(defn has-status? [status id]
+  (=
+    status
+    (first (commit-statuses (:sha (last-commit id))))))
+
+(defn has-comment? [id comment]
+  (not
+    (empty?
+      (filter
+        #(< -1 (.indexOf (str (:body %)) comment))
+        (issues/issue-comments organization repository id my-auth)))))
+
+(defn comments
+  [id comment-str]
+  (map :id
+    (filter #(< -1 (.indexOf (str (:body %)) comment-str))
+      (issues/issue-comments organization repository id my-auth))))
+
+(defn delete-comment [id]
+  (issues/delete-comment organization repository id my-auth))
+
+(defn create-comment [issue comment]
+  (issues/create-comment organization repository issue comment my-auth))
+
+(defn failed-prs [base]
+  (filter #(has-status? "failure" %) (get-prs base)))
+
+(defn passed-prs [base]
+  (filter #(has-status? "success" %) (mergeable-prs base)))
+
+(defn retry-failed-prs [base]
+  (map
+    #(create-comment % "test this please.")
+    (failed-prs base)))
+
+(defn delete-comments [base comment]
+  (map delete-comment
+    (flatten
+      (map
+        #(comments % comment)
+        (filter
+          #(has-comment? % comment)
+          (get-prs base))))))
+
+(defn clean-pr-comments [base]
+  (flatten
+    (merge
+      (delete-comments base "cake is a lie")
+      (delete-comments base "just keep on trying")
+      (delete-comments base "test this please"))))
+
+(defn make-links [pr-numbers & {:keys [except] :or {except #{}}}]
+  (apply prn (map #(prn (format "https://github.com/%s/%s/pull/%s" organization repository %)) (remove except pr-numbers))))
+
+(defn create-pr [from base head body]
+  (pulls/create-pull organization repository from base head (merge {:body body } my-auth)))
+
+(defn close-pr [id]
+  (pulls/edit-pull organization repository id (merge {:state "closed"} my-auth)))
+
+(defn labels [id]
+  (issues/issue-labels organization repository id my-auth))
+
+(defn add-labels [labels id]
+  (issues/add-labels organization repository id labels my-auth))
+
+(defn move-pr [new-base id]
+  ; GitHub PR returns the follow fields we need:
+  ;:title => from
+  ;:ref :head => head
+  ;:body => body
+  ;:login :user => username
+  ;:ref :base => orig-base
+  (let [{
+    from :title
+    body :body
+    {head :ref} :head
+    {orig-base :ref} :base
+    {username :login} :user} (pull id)
+    labels (remove nil? (map :name (labels id)))]
+    (do
+      (close-pr id)
+      (add-labels labels (:number (create-pr from new-base head
+        (format "%s\n\nPing: @%s\nMoved PR #%s from ``%s``" body username id orig-base)))))))
