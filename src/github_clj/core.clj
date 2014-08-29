@@ -18,15 +18,18 @@
 (def organization (:organization config))
 (def repository (:repository config))
 
+(defn call-for [fn & args]
+  (apply fn organization repository args))
+
 (defn pulls [base]
-  (pulls/pulls organization repository (merge my-auth {:base base})))
+  (call-for pulls/pulls (merge my-auth {:base base})))
 
 (defn get-prs [base]
   (remove nil?
     (map :number (pulls base))))
 
 (defn pull [id]
-  (pulls/specific-pull organization repository id my-auth))
+  (call-for pulls/specific-pull id my-auth))
 
 (defn mergeable-prs [base]
   (map :number
@@ -39,11 +42,11 @@
       (map pull (get-prs base)))))
 
 (defn issues [base]
-  (issues/issues organization repository (merge my-auth {:base base})))
+  (call-for issues/issues (merge my-auth {:base base})))
 
 (defn commits
   [id]
-  (pulls/commits organization repository id my-auth))
+  (call-for pulls/commits id my-auth))
 
 (defn last-commit
   [id]
@@ -64,19 +67,19 @@
     (empty?
       (filter
         #(< -1 (.indexOf (str (:body %)) comment))
-        (issues/issue-comments organization repository id my-auth)))))
+        (call-for issues/issue-comments id my-auth)))))
 
 (defn comments
   [id comment-str]
   (map :id
     (filter #(< -1 (.indexOf (str (:body %)) comment-str))
-      (issues/issue-comments organization repository id my-auth))))
+      (call-for issues/issue-comments id my-auth))))
 
 (defn delete-comment [id]
-  (issues/delete-comment organization repository id my-auth))
+  (call-for issues/delete-comment id my-auth))
 
 (defn create-comment [issue comment]
-  (issues/create-comment organization repository issue comment my-auth))
+  (call-for issues/create-comment issue comment my-auth))
 
 (defn failed-prs [base]
   (filter #(has-status? "failure" %) (get-prs base)))
@@ -109,16 +112,16 @@
   (apply prn (map #(prn (format "https://github.com/%s/%s/pull/%s" organization repository %)) (remove except pr-numbers))))
 
 (defn create-pr [from base head body]
-  (pulls/create-pull organization repository from base head (merge {:body body } my-auth)))
+  (call-for pulls/create-pull from base head (merge {:body body } my-auth)))
 
 (defn close-pr [id]
-  (pulls/edit-pull organization repository id (merge {:state "closed"} my-auth)))
+  (call-for pulls/edit-pull id (merge {:state "closed"} my-auth)))
 
 (defn labels [id]
-  (issues/issue-labels organization repository id my-auth))
+  (call-for issues/issue-labels id my-auth))
 
 (defn add-labels [labels id]
-  (issues/add-labels organization repository id labels my-auth))
+  (call-for issues/add-labels id labels my-auth))
 
 (defn move-pr [new-base id]
   ; GitHub PR returns the follow fields we need:
