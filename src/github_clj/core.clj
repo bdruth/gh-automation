@@ -57,6 +57,15 @@
   (remove nil?
     (map :state (api-call :get "/repos/%s/%s/statuses/%s" [organization repository sha] my-auth))))
 
+(defn get-refs
+  [ref]
+  (api-call :get "/repos/%s/%s/git/refs/heads/%s" [organization repository ref] my-auth))
+
+(defn update-branch
+  [ref]
+  (api-call :patch "/repos/%s/%s/git/refs/heads/%s" [organization repository ref] my-auth))
+
+
 (defn has-status? [status id]
   (=
     status
@@ -106,7 +115,9 @@
     (merge
       (delete-comments base "cake is a lie")
       (delete-comments base "just keep on trying")
-      (delete-comments base "test this please"))))
+      (delete-comments base "test this please")
+      (delete-comments base "Test FAILed")
+      (delete-comments base "Refer to this link for build results"))))
 
 (defn make-links [pr-numbers & {:keys [except] :or {except #{}}}]
   (apply prn (map #(prn (format "https://github.com/%s/%s/pull/%s" organization repository %)) (remove except pr-numbers))))
@@ -124,7 +135,7 @@
   (call-for issues/add-labels id labels my-auth))
 
 (defn move-pr [new-base id]
-  ; GitHub PR returns the follow fields we need:
+  ; GitHub PR returns the following fields we need:
   ;:title => from
   ;:ref :head => head
   ;:body => body
